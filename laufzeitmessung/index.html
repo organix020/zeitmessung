@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laufzeitmessung</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Laufzeit">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#eef2f0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1412" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: Bedienfeld (Uhr, Tasten, Eingabe) steht fest, die Zeitenliste scrollt darunter;
+   ab Tablet-Querformat stehen Bedienfeld und Liste nebeneinander. */
+:root {
+  --bg: #eef2f0;
+  --surface: #ffffff;
+  --ink: #101c18;
+  --muted: #566660;
+  --line: #cfd8d4;
+  --accent: #1747d1;
+  --on-accent: #ffffff;
+  --go: #13733a;
+  --stop: #b8261c;
+  --warn: #9a5b00;
+  --warn-bg: #fff1d6;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1412;
+    --surface: #17211e;
+    --ink: #eaf1ee;
+    --muted: #9db0aa;
+    --line: #2c3b36;
+    --accent: #6b97ff;
+    --on-accent: #08122e;
+    --go: #48c47a;
+    --stop: #ff7366;
+    --warn: #f2b84b;
+    --warn-bg: #3a2c0c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1412;
+  --surface: #17211e;
+  --ink: #eaf1ee;
+  --muted: #9db0aa;
+  --line: #2c3b36;
+  --accent: #6b97ff;
+  --on-accent: #08122e;
+  --go: #48c47a;
+  --stop: #ff7366;
+  --warn: #f2b84b;
+  --warn-bg: #3a2c0c;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.35;
+  -webkit-text-size-adjust: 100%;
+}
+button, input { font: inherit; color: inherit; }
+button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .4; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px 0;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+/* ---------- Bedienfeld ---------- */
+.panel {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.25rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.pill {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  padding: 2px 12px;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pill[data-state="running"] { color: var(--go); }
+.pill[data-state="finished"] { color: var(--stop); }
+
+.clockbox {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px 14px 8px;
+}
+.clock {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(3.2rem, 15vw, 5.6rem);
+  line-height: 1;
+  letter-spacing: .01em;
+}
+.meta { color: var(--muted); font-size: .95rem; min-height: 1.3em; }
+
+.btn {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.2rem;
+  letter-spacing: .03em;
+  min-height: 48px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+}
+.btn-go { background: var(--go); border-color: var(--go); color: var(--on-accent); }
+.btn-stop { border-color: var(--stop); color: var(--stop); }
+.btn-quiet { font-family: var(--font-body); font-weight: 500; font-size: .98rem; min-height: 44px; }
+
+.race { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 8px; }
+
+.capture { display: grid; grid-template-columns: minmax(6.5rem, 9.5rem) 1fr; gap: 8px; align-items: stretch; }
+.field { display: flex; flex-direction: column; gap: 3px; }
+.field label { font-size: .8rem; color: var(--muted); font-weight: 500; }
+.field input {
+  flex: 1;
+  width: 100%;
+  min-height: 60px;
+  padding: 4px 10px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 2rem;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: 8px;
+}
+.btn-lap {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.6rem, 6.5vw, 2.2rem);
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  min-height: 88px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.btn-lap:active:not(:disabled) { transform: scale(.985); filter: brightness(.9); }
+
+.files { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.offline { margin: 0; font-size: .85rem; color: var(--muted); }
+.offline[data-ok="yes"] { color: var(--go); font-weight: 500; }
+
+/* ---------- Zeitenliste ---------- */
+.list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  overflow: hidden;
+}
+.stats {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: .95rem;
+  color: var(--muted);
+}
+.stats strong { color: var(--ink); font-weight: 600; }
+.stats .flag { color: var(--warn); font-weight: 600; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface);
+  text-align: left;
+  font-size: .8rem;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+tbody td { padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th:first-child, td:first-child { padding-left: 12px; }
+th:last-child, td:last-child { padding-right: 12px; text-align: right; }
+.c-place { width: 3.6rem; font-family: var(--font-display); font-weight: 600; font-size: 1.35rem; font-variant-numeric: tabular-nums; color: var(--muted); }
+.c-bib { width: 8.5rem; }
+.c-bib input {
+  width: 100%;
+  min-height: 40px;
+  padding: 2px 8px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg);
+  border: 2px solid var(--line);
+  border-radius: 6px;
+}
+.c-bib input.dup { border-color: var(--warn); background: var(--warn-bg); }
+.c-time { font-family: var(--font-display); font-weight: 600; font-size: 1.6rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.del {
+  min-width: 40px; min-height: 40px;
+  padding: 0 8px;
+  border: 0; border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: .95rem; font-weight: 600;
+}
+.del.armed { background: var(--stop); color: var(--on-accent); }
+tr.fresh td { animation: flash 1.1s ease-out; }
+@keyframes flash { from { background: color-mix(in srgb, var(--accent) 28%, transparent); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { tr.fresh td { animation: none; } .btn-lap:active:not(:disabled) { transform: none; } }
+.empty { margin: 0; padding: 22px 14px; color: var(--muted); max-width: 60ch; }
+
+/* ---------- Dialoge und Meldungen ---------- */
+.overlay {
+  position: fixed; inset: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  background: rgba(8, 14, 12, .6);
+}
+.dialog {
+  width: min(100%, 30rem);
+  max-height: 100%;
+  overflow: auto;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.dialog h2 { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 1.5rem; text-wrap: balance; }
+.dialog p { margin: 0; }
+.dialog .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dialog textarea {
+  width: 100%; height: 11rem;
+  font: .85rem/1.3 ui-monospace, Menlo, Consolas, monospace;
+  color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+}
+.toast {
+  position: fixed; left: 50%; bottom: 18px; z-index: 20;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--ink); color: var(--bg);
+  font-weight: 500;
+}
+
+/* ---------- Breite Bildschirme: Bedienfeld links, Liste rechts ---------- */
+@media (min-width: 880px) {
+  .app { flex-direction: row; gap: 16px; padding: 16px 16px 0; }
+  .panel { width: 420px; padding-bottom: 16px; overflow-y: auto; }
+  .clock { font-size: 5.2rem; }
+}
+/* Niedrige Bildschirme (Smartphone quer): Uhr kompakter */
+@media (max-height: 560px) and (max-width: 879px) {
+  .clock { font-size: 2.6rem; }
+  .btn-lap { min-height: 64px; }
+  .field input { min-height: 48px; }
+}
+@media (max-width: 380px) {
+  .btn { font-size: 1.05rem; padding: 6px 6px; }
+  .btn-quiet { font-size: .88rem; }
+  .c-bib { width: 6.5rem; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <section class="panel" aria-label="Bedienung">
+    <div class="titlebar">
+      <h1>Laufzeitmessung</h1>
+      <span class="pill" id="status" data-state="ready">Bereit</span>
+    </div>
+
+    <div class="clockbox">
+      <div class="clock" id="clock" role="timer" aria-live="off">0:00:00,0</div>
+      <div class="meta" id="meta">Noch nicht gestartet</div>
+    </div>
+
+    <div class="race">
+      <button type="button" class="btn btn-go" id="btnStart">Start</button>
+      <button type="button" class="btn btn-stop" id="btnEnd" disabled>Beenden</button>
+      <button type="button" class="btn" id="btnReset" disabled>Zurücksetzen</button>
+    </div>
+
+    <form class="capture" id="captureForm" autocomplete="off">
+      <div class="field">
+        <label for="bib">Startnummer (optional)</label>
+        <input id="bib" name="bib" type="text" inputmode="numeric" maxlength="12" enterkeyhint="done" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      </div>
+      <button type="button" class="btn-lap" id="btnLap" disabled>Zielzeit stoppen</button>
+    </form>
+
+    <div class="files">
+      <button type="button" class="btn btn-quiet" id="btnCsv">CSV für Excel</button>
+      <button type="button" class="btn btn-quiet" id="btnBackup">Sicherung speichern</button>
+      <button type="button" class="btn btn-quiet" id="btnRestore">Sicherung laden</button>
+      <input type="file" id="fileRestore" hidden>
+    </div>
+
+    <p class="offline" id="offline" hidden></p>
+  </section>
+
+  <main class="list" aria-label="Zielzeiten">
+    <div class="stats" id="stats"></div>
+    <div class="scroll" id="scroll">
+      <table id="table" hidden>
+        <thead>
+          <tr><th scope="col">Platz</th><th scope="col">Startnr.</th><th scope="col">Laufzeit</th><th scope="col"><span aria-hidden="true">&nbsp;</span></th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p class="empty" id="empty">Noch keine Zielzeiten. Mit „Start“ beginnt die Messung. Jeder Druck auf „Zielzeit stoppen“ (oder Enter im Feld Startnummer) hält eine Zeit fest; der letzte Einlauf steht oben. Startnummern lassen sich jederzeit in der Liste nachtragen.</p>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="confirm" hidden>
+  <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+    <h2 id="confirmTitle"></h2>
+    <p id="confirmText"></p>
+    <div class="row">
+      <button type="button" class="btn" id="confirmNo">Abbrechen</button>
+      <button type="button" class="btn btn-stop" id="confirmYes"></button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="copy" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="copyTitle">
+    <h2 id="copyTitle">Datei konnte nicht gespeichert werden</h2>
+    <p id="copyHint"></p>
+    <textarea id="copyText" readonly aria-label="Dateiinhalt"></textarea>
+    <div class="row">
+      <button type="button" class="btn" id="copyClose">Schließen</button>
+      <button type="button" class="btn btn-go" id="copyDo">Inhalt kopieren</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORE_KEY = "laufzeitmessung.v1";
+  var APP_ID = "laufzeitmessung";
+
+  // Zustand. start/end sind absolute Zeitpunkte der Systemuhr (ms seit 1970),
+  // jede Zielzeit ist die Differenz Zeitpunkt des Tastendrucks minus start.
+  var S = { start: null, end: null, entries: [], nextId: 1 };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var elClock = $("clock"), elMeta = $("meta"), elStatus = $("status");
+  var btnStart = $("btnStart"), btnEnd = $("btnEnd"), btnReset = $("btnReset"), btnLap = $("btnLap");
+  var inBib = $("bib"), elRows = $("rows"), elTable = $("table"), elEmpty = $("empty"), elStats = $("stats");
+
+  /* ---------- Zeit ---------- */
+
+  // Zeitpunkt eines Ereignisses. Der Browser stempelt den Tastendruck selbst;
+  // die Verzögerung bis zur Verarbeitung wird hier wieder abgezogen.
+  function eventEpoch(e) {
+    var now = Date.now();
+    if (e && typeof e.timeStamp === "number" && window.performance && performance.now) {
+      var lag = performance.now() - e.timeStamp;
+      if (lag >= 0 && lag < 2000) return Math.round(now - lag);
+    }
+    return now;
+  }
+
+  function pad(n, w) { n = String(n); while (n.length < w) n = "0" + n; return n; }
+
+  // ms -> "h:mm:ss,cc" (digits = 1 oder 2 Nachkommastellen, abgeschnitten)
+  function fmt(ms, digits) {
+    if (ms < 0) ms = 0;
+    var h = Math.floor(ms / 3600000);
+    var m = Math.floor(ms / 60000) % 60;
+    var s = Math.floor(ms / 1000) % 60;
+    var frac = digits === 1 ? String(Math.floor(ms / 100) % 10) : pad(Math.floor(ms / 10) % 100, 2);
+    return h + ":" + pad(m, 2) + ":" + pad(s, 2) + "," + frac;
+  }
+
+  function clockTime(epoch) {
+    var d = new Date(epoch);
+    return pad(d.getHours(), 2) + ":" + pad(d.getMinutes(), 2) + ":" + pad(d.getSeconds(), 2);
+  }
+
+  function fileStamp() {
+    var d = new Date();
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1, 2) + "-" + pad(d.getDate(), 2) + "_" + pad(d.getHours(), 2) + pad(d.getMinutes(), 2) + pad(d.getSeconds(), 2);
+  }
+
+  function state() { return S.start === null ? "ready" : (S.end === null ? "running" : "finished"); }
+
+  /* ---------- Speichern im Browser ---------- */
+
+  function persist() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* ohne Speicher weiterarbeiten */ }
+  }
+
+  function isNum(x) { return typeof x === "number" && isFinite(x); }
+
+  // Prüft und bereinigt eingelesene Daten. Gibt null zurück, wenn sie nicht passen.
+  function normalize(o) {
+    if (!o || typeof o !== "object" || !Array.isArray(o.entries)) return null;
+    var start = o.start === null || o.start === undefined ? null : o.start;
+    var end = o.end === null || o.end === undefined ? null : o.end;
+    if (start !== null && !isNum(start)) return null;
+    if (end !== null && !isNum(end)) return null;
+    if (start === null) end = null;
+    var list = [];
+    for (var i = 0; i < o.entries.length; i++) {
+      var en = o.entries[i];
+      if (!en || !isNum(en.t) || en.t < 0) return null;
+      list.push({ t: Math.round(en.t), bib: String(en.bib === undefined || en.bib === null ? "" : en.bib).slice(0, 12) });
+    }
+    list.sort(function (a, b) { return a.t - b.t; });
+    for (var j = 0; j < list.length; j++) list[j].id = j + 1;
+    return { start: start, end: end, entries: list, nextId: list.length + 1 };
+  }
+
+  function loadStored() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return;
+      var n = normalize(JSON.parse(raw));
+      if (n) S = n;
+    } catch (e) { /* leer starten */ }
+  }
+
+  /* ---------- Anzeige ---------- */
+
+  function makeRow(entry, place, fresh) {
+    var tr = document.createElement("tr");
+    tr.dataset.id = String(entry.id);
+    if (fresh) tr.className = "fresh";
+
+    var tdPlace = document.createElement("td");
+    tdPlace.className = "c-place";
+    tdPlace.textContent = String(place);
+
+    var tdBib = document.createElement("td");
+    tdBib.className = "c-bib";
+    var inp = document.createElement("input");
+    inp.type = "text";
+    inp.id = "bib-" + entry.id;
+    inp.inputMode = "numeric";
+    inp.maxLength = 12;
+    inp.autocomplete = "off";
+    inp.spellcheck = false;
+    inp.value = entry.bib;
+    inp.placeholder = "–";
+    inp.setAttribute("aria-label", "Startnummer für Platz " + place);
+    tdBib.appendChild(inp);
+
+    var tdTime = document.createElement("td");
+    tdTime.className = "c-time";
+    tdTime.textContent = fmt(entry.t, 2);
+
+    var tdDel = document.createElement("td");
+    var del = document.createElement("button");
+    del.type = "button";
+    del.className = "del";
+    del.textContent = "✕";
+    del.setAttribute("aria-label", "Zeit von Platz " + place + " löschen");
+    tdDel.appendChild(del);
+
+    tr.appendChild(tdPlace); tr.appendChild(tdBib); tr.appendChild(tdTime); tr.appendChild(tdDel);
+    return tr;
+  }
+
+  function renderRows() {
+    var frag = document.createDocumentFragment();
+    for (var i = S.entries.length - 1; i >= 0; i--) frag.appendChild(makeRow(S.entries[i], i + 1, false));
+    elRows.replaceChildren(frag);
+    refreshList();
+  }
+
+  // Zähler, Leerhinweis und Markierung doppelter Startnummern
+  function refreshList() {
+    var n = S.entries.length, missing = 0, counts = {}, i, b;
+    for (i = 0; i < n; i++) {
+      b = S.entries[i].bib.trim();
+      if (!b) missing++; else counts[b] = (counts[b] || 0) + 1;
+    }
+    var dupBibs = 0;
+    for (b in counts) if (counts[b] > 1) dupBibs++;
+
+    var inputs = elRows.querySelectorAll("input");
+    for (i = 0; i < inputs.length; i++) {
+      b = inputs[i].value.trim();
+      inputs[i].classList.toggle("dup", !!b && counts[b] > 1);
+    }
+
+    elTable.hidden = n === 0;
+    elEmpty.hidden = n !== 0;
+
+    elStats.replaceChildren();
+    var a = document.createElement("span");
+    var strong = document.createElement("strong");
+    strong.textContent = String(n);
+    a.appendChild(strong);
+    a.appendChild(document.createTextNode(n === 1 ? " Zielzeit" : " Zielzeiten"));
+    elStats.appendChild(a);
+    if (missing) {
+      var m = document.createElement("span");
+      m.textContent = missing + " ohne Startnummer";
+      elStats.appendChild(m);
+    }
+    if (dupBibs) {
+      var d = document.createElement("span");
+      d.className = "flag";
+      d.textContent = dupBibs === 1 ? "1 Startnummer doppelt vergeben" : dupBibs + " Startnummern doppelt vergeben";
+      elStats.appendChild(d);
+    }
+  }
+
+  function renderState() {
+    var st = state();
+    elStatus.dataset.state = st;
+    elStatus.textContent = st === "ready" ? "Bereit" : st === "running" ? "Läuft" : "Beendet";
+    btnStart.disabled = st !== "ready";
+    btnLap.disabled = st !== "running";
+    btnEnd.disabled = st === "ready";
+    btnEnd.textContent = st === "finished" ? "Fortsetzen" : "Beenden";
+    btnReset.disabled = st === "running" || (st === "ready" && S.entries.length === 0);
+    if (st === "ready") elMeta.textContent = "Noch nicht gestartet";
+    else if (st === "running") elMeta.textContent = "Start um " + clockTime(S.start) + " Uhr";
+    else elMeta.textContent = "Start um " + clockTime(S.start) + " Uhr, beendet um " + clockTime(S.end) + " Uhr";
+    renderClock();
+  }
+
+  function renderClock() {
+    var st = state(), ms = 0;
+    if (st === "running") ms = Date.now() - S.start;
+    else if (st === "finished") ms = S.end - S.start;
+    var txt = fmt(ms, 1);
+    if (elClock.textContent !== txt) elClock.textContent = txt;
+  }
+
+  /* ---------- Meldungen und Rückfragen ---------- */
+
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $("toast");
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, 3200);
+  }
+
+  var confirmResolve = null;
+  function ask(title, text, yesLabel) {
+    $("confirmTitle").textContent = title;
+    $("confirmText").textContent = text;
+    $("confirmYes").textContent = yesLabel;
+    $("confirm").hidden = false;
+    $("confirmNo").focus();
+    return new Promise(function (resolve) { confirmResolve = resolve; });
+  }
+  function closeConfirm(answer) {
+    $("confirm").hidden = true;
+    if (confirmResolve) { var r = confirmResolve; confirmResolve = null; r(answer); }
+  }
+  $("confirmYes").addEventListener("click", function () { closeConfirm(true); });
+  $("confirmNo").addEventListener("click", function () { closeConfirm(false); });
+
+  /* ---------- Wettkampf steuern ---------- */
+
+  var wakeLock = null;
+  function keepAwake() {
+    try {
+      if (state() === "running" && navigator.wakeLock && document.visibilityState === "visible") {
+        navigator.wakeLock.request("screen").then(function (l) { wakeLock = l; }).catch(function () {});
+      }
+    } catch (e) { /* nicht verfügbar */ }
+  }
+  function releaseAwake() {
+    try { if (wakeLock) { wakeLock.release().catch(function () {}); wakeLock = null; } } catch (e) {}
+  }
+  document.addEventListener("visibilitychange", keepAwake);
+
+  function startRace(e) {
+    if (state() !== "ready") return;
+    S.start = eventEpoch(e);
+    S.end = null;
+    persist();
+    renderState();
+    keepAwake();
+  }
+
+  function capture(e) {
+    if (state() !== "running") { toast("Die Messung läuft nicht. Erst „Start“ drücken."); return; }
+    var t = eventEpoch(e) - S.start;
+    if (t < 0) t = 0;
+    var last = S.entries.length ? S.entries[S.entries.length - 1].t : 0;
+    if (t < last) t = last; // Reihenfolge bleibt die Einlaufreihenfolge
+    var entry = { id: S.nextId++, t: t, bib: inBib.value.trim().slice(0, 12) };
+    S.entries.push(entry);
+    persist();
+    inBib.value = "";
+    elRows.insertBefore(makeRow(entry, S.entries.length, true), elRows.firstChild);
+    $("scroll").scrollTop = 0;
+    refreshList();
+  }
+
+  function endOrResume() {
+    var st = state();
+    if (st === "running") {
+      ask("Wettkampf beenden?", "Die Uhr wird angehalten. Mit „Fortsetzen“ läuft sie ab dem ursprünglichen Start weiter, falls doch noch jemand ins Ziel kommt.", "Beenden").then(function (ok) {
+        if (!ok || state() !== "running") return;
+        S.end = Date.now();
+        persist();
+        renderState();
+        releaseAwake();
+      });
+    } else if (st === "finished") {
+      S.end = null;
+      persist();
+      renderState();
+      keepAwake();
+    }
+  }
+
+  function resetRace() {
+    if (state() === "running") return;
+    var n = S.entries.length;
+    ask("Alles zurücksetzen?", (n ? "Die " + n + (n === 1 ? " Zielzeit wird" : " Zielzeiten werden") + " gelöscht. " : "") + "Vorher bei Bedarf CSV oder Sicherung speichern. Danach kann ein neuer Wettkampf gestartet werden.", "Zurücksetzen").then(function (ok) {
+      if (!ok) return;
+      S = { start: null, end: null, entries: [], nextId: 1 };
+      persist();
+      inBib.value = "";
+      renderRows();
+      renderState();
+    });
+  }
+
+  // Start und Zielzeit lösen schon beim Herunterdrücken aus, nicht erst beim Loslassen.
+  function bindPress(btn, fn) {
+    var lastDown = 0;
+    btn.addEventListener("pointerdown", function (e) {
+      if (e.button && e.button !== 0) return;
+      if (btn.disabled) return;
+      lastDown = Date.now();
+      fn(e);
+    });
+    btn.addEventListener("click", function (e) {
+      if (Date.now() - lastDown < 1000) return; // schon beim Herunterdrücken verarbeitet
+      if (btn.disabled) return;
+      fn(e); // Tastatur, Bedienungshilfen
+    });
+  }
+  bindPress(btnStart, startRace);
+  bindPress(btnLap, capture);
+  btnEnd.addEventListener("click", endOrResume);
+  btnReset.addEventListener("click", resetRace);
+
+  $("captureForm").addEventListener("submit", function (e) { e.preventDefault(); });
+  inBib.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.repeat) { e.preventDefault(); capture(e); }
+  });
+
+  /* ---------- Liste bearbeiten ---------- */
+
+  function entryOfRow(tr) {
+    var id = Number(tr.dataset.id);
+    for (var i = 0; i < S.entries.length; i++) if (S.entries[i].id === id) return S.entries[i];
+    return null;
+  }
+
+  elRows.addEventListener("input", function (e) {
+    if (e.target.tagName !== "INPUT") return;
+    var en = entryOfRow(e.target.closest("tr"));
+    if (!en) return;
+    en.bib = e.target.value.trim().slice(0, 12);
+    persist();
+    refreshList();
+  });
+
+  // Enter in der Liste springt zum nächsten Platz (eine Zeile höher): praktisch beim Nachtragen ab Platz 1
+  elRows.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" || e.target.tagName !== "INPUT") return;
+    e.preventDefault();
+    var prev = e.target.closest("tr").previousElementSibling;
+    if (prev) { var i = prev.querySelector("input"); i.focus(); i.select(); }
+    else e.target.blur();
+  });
+
+  elRows.addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest("button.del") : null;
+    if (!btn) return;
+    if (!btn.classList.contains("armed")) {
+      btn.classList.add("armed");
+      btn.textContent = "Löschen?";
+      setTimeout(function () {
+        if (btn.isConnected) { btn.classList.remove("armed"); btn.textContent = "✕"; }
+      }, 3000);
+      return;
+    }
+    var en = entryOfRow(btn.closest("tr"));
+    if (!en) return;
+    S.entries.splice(S.entries.indexOf(en), 1);
+    persist();
+    renderRows();
+    renderState();
+  });
+
+  /* ---------- Dateien ---------- */
+
+  // Als veröffentlichte Claude-Seite läuft das Speichern über die Download-Funktion der Seite,
+  // als lokal geöffnete HTML-Datei über den normalen Browser-Download.
+  var hosted = !!(window.claude && typeof window.claude.use === "function");
+  var dlReady = hosted
+    ? Promise.resolve().then(function () { return window.claude.use("downloads"); }).catch(function () { return null; })
+    : Promise.resolve(null);
+
+  function showCopy(filename, text) {
+    $("copyHint").textContent = "Der Inhalt von „" + filename + "“ steht unten. Kopieren, in einen Texteditor einfügen und unter diesem Namen speichern.";
+    $("copyText").value = text;
+    $("copy").hidden = false;
+  }
+  $("copyClose").addEventListener("click", function () { $("copy").hidden = true; });
+  $("copyDo").addEventListener("click", function () {
+    var ta = $("copyText");
+    var done = function () { toast("Inhalt kopiert."); };
+    var manual = function () { ta.focus(); ta.select(); toast("Text ist markiert. Jetzt mit Strg+C oder „Kopieren“ übernehmen."); };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(done, manual);
+      else manual();
+    } catch (e) { manual(); }
+  });
+
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  // iPhone und iPad: Datei über das Teilen-Menü abgeben („In Dateien sichern“, AirDrop, Mail).
+  // Gibt false zurück, wenn das Gerät das nicht kann.
+  function shareFile(filename, text, mime) {
+    if (!navigator.share || !navigator.canShare || typeof File !== "function") return false;
+    var file = new File([text], filename, { type: mime.split(";")[0] });
+    if (!navigator.canShare({ files: [file] })) {
+      file = new File([text], filename, { type: "text/plain" });
+      if (!navigator.canShare({ files: [file] })) return false;
+    }
+    navigator.share({ files: [file] }).then(function () {
+      toast("„" + filename + "“ übergeben.");
+    }, function (err) {
+      if (err && err.name === "AbortError") toast("Speichern abgebrochen.");
+      else showCopy(filename, text);
+    });
+    return true;
+  }
+
+  function saveFile(filename, text, mime) {
+    if (!hosted && isIOS) {
+      try { if (shareFile(filename, text, mime)) return; } catch (e) { /* weiter mit Download */ }
+    }
+    if (!hosted) {
+      try {
+        var blob = new Blob([text], { type: mime });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url; a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        toast("„" + filename + "“ wird gespeichert.");
+      } catch (e) { showCopy(filename, text); }
+      return;
+    }
+    toast("Datei wird vorbereitet …");
+    dlReady.then(function (dl) {
+      if (!dl) { showCopy(filename, text); return; }
+      dl.save({ filename: filename, data: text }).then(function () {
+        toast("„" + filename + "“ gespeichert.");
+      }, function (err) {
+        if (err && err.code === "declined") toast("Speichern abgebrochen.");
+        else if (err && err.code === "rate_limited") toast("Es ist noch ein Speichern-Dialog offen. Bitte kurz warten und erneut versuchen.");
+        else showCopy(filename, text);
+      });
+    });
+  }
+
+  function csvCell(v) {
+    v = String(v);
+    if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; // Excel soll Startnummern nie als Formel lesen
+    if (/[";\r\n]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
+    return v;
+  }
+
+  function buildCsv() {
+    var lines = ["Platz;Startnummer;Laufzeit;Sekunden;Uhrzeit Zieleinlauf"];
+    for (var i = 0; i < S.entries.length; i++) {
+      var en = S.entries[i];
+      lines.push([
+        i + 1,
+        csvCell(en.bib),
+        fmt(en.t, 2),
+        (en.t / 1000).toFixed(3).replace(".", ","),
+        S.start === null ? "" : clockTime(S.start + en.t)
+      ].join(";"));
+    }
+    return "﻿" + lines.join("\r\n") + "\r\n";
+  }
+
+  $("btnCsv").addEventListener("click", function () {
+    if (!S.entries.length) { toast("Es gibt noch keine Zielzeiten zum Exportieren."); return; }
+    saveFile("laufzeiten_" + fileStamp() + ".csv", buildCsv(), "text/csv;charset=utf-8");
+  });
+
+  $("btnBackup").addEventListener("click", function () {
+    if (state() === "ready" && !S.entries.length) { toast("Es gibt noch nichts zu sichern."); return; }
+    var data = {
+      app: APP_ID, version: 1, saved: new Date().toISOString(),
+      start: S.start, end: S.end,
+      entries: S.entries.map(function (en) { return { t: en.t, bib: en.bib }; })
+    };
+    saveFile("laufzeit-sicherung_" + fileStamp() + ".json", JSON.stringify(data, null, 1), "application/json");
+  });
+
+  var fileRestore = $("fileRestore");
+  $("btnRestore").addEventListener("click", function () { fileRestore.value = ""; fileRestore.click(); });
+  fileRestore.addEventListener("change", function () {
+    var f = fileRestore.files && fileRestore.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onerror = function () { toast("Die Datei konnte nicht gelesen werden."); };
+    reader.onload = function () {
+      var n = null;
+      try {
+        var o = JSON.parse(String(reader.result).replace(/^﻿/, ""));
+        if (o && o.app === APP_ID) n = normalize(o);
+      } catch (e) { n = null; }
+      if (!n) { toast("Das ist keine Sicherungsdatei dieser Zeitmessung (.json)."); return; }
+      var apply = function () {
+        S = n;
+        persist();
+        renderRows();
+        renderState();
+        keepAwake();
+        toast("Sicherung geladen: " + n.entries.length + (n.entries.length === 1 ? " Zielzeit." : " Zielzeiten."));
+      };
+      if (state() === "ready" && !S.entries.length) { apply(); return; }
+      ask("Sicherung laden?", "Die aktuelle Messung mit " + S.entries.length + (S.entries.length === 1 ? " Zielzeit" : " Zielzeiten") + " wird durch die Sicherung mit " + n.entries.length + " ersetzt.", "Ersetzen").then(function (ok) { if (ok) apply(); });
+    };
+    reader.readAsText(f);
+  });
+
+  /* ---------- Betrieb ohne Internet ---------- */
+
+  (function () {
+    var el = $("offline");
+    var standalone = window.navigator.standalone === true || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+    var homeHint = isIOS && !standalone ? " Für die App auf dem Home-Bildschirm: in Safari „Teilen“ und dann „Zum Home-Bildschirm“ wählen." : "";
+    if (!("serviceWorker" in navigator) || !/^https?:$/.test(location.protocol)) return;
+    el.hidden = false;
+    el.textContent = "Betrieb ohne Internet wird vorbereitet …";
+    navigator.serviceWorker.register("sw.js").then(function () {
+      return navigator.serviceWorker.ready;
+    }).then(function () {
+      return caches.match("index.html");
+    }).then(function (hit) {
+      if (hit) { el.dataset.ok = "yes"; el.textContent = "Bereit für den Betrieb ohne Internet." + homeHint; }
+      else el.textContent = "Noch nicht ohne Internet nutzbar. Seite bei bestehender Verbindung neu laden.";
+    }).catch(function () {
+      el.textContent = "Betrieb ohne Internet ist hier nicht möglich. Die Seite muss über https:// aufgerufen werden.";
+    });
+  })();
+
+  /* ---------- Start ---------- */
+
+  loadStored();
+  renderRows();
+  renderState();
+  keepAwake();
+  setInterval(renderClock, 50);
+})();
+</script>
+</body>
+</html>
